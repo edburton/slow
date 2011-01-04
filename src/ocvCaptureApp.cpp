@@ -31,7 +31,7 @@ public:
 
 void ocvCaptureApp::setup()
 {
-	opacityI=mCapI=0;
+	opacityI=mCapI=1;
 	opacitys[0]= 1/200.0f;
 	opacitys[1]= 1/100.0f;
 	opacitys[2]= 1/20.0f;
@@ -72,16 +72,15 @@ void ocvCaptureApp::update()
 		vector<cv::Mat> planes;
 		split(rgb, planes);
 		
-		cv::Scalar  sums=cv::sum(rgb);
+		cv::Scalar  sums=cv::mean(rgb);
 		float max=0;
 		for (int i=0;i<3;i++)
 			if (sums[i]>max)
 				max=sums[i];
 		float v[3];
 		for (int i=0;i<3;i++)
-			v[i]=sqrt(sums[i]/max);
+			v[i]=(sums[i]/max);
 		//console() << "sums[" << v[0] << "," << v[1] << "," << v[2] << "]" << std::endl;
-		
 		cv::Mat blue(planes[0]),b;
 		cv::equalizeHist(blue, b);
 		cv::Mat green(planes[1]),g;
@@ -94,14 +93,9 @@ void ocvCaptureApp::update()
 		int from_to[] = { 0,0,  1,1,  2,2 };
 		cv::Mat bgr[] = { blue,green	,red};
 		cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
-		//console() << "cvA[" << cvA.size().width << "," << cvA.size().height << "*" << cvA.channels() << "]" << std::endl;
-		//console() << "cvOut[" << cvOut.size().width << "," << cvOut.size().height << "*" << cvOut.channels() << "]" << std::endl;
 		cv::flip(cvP1,cvP2,1);
-		////cv::blur( cvP2, cvP1, cv::Size(40,40) );
-		//cv::medianBlur( cvP2, cvP1, 3 );
-		////cv::boxFilter( cvP2, cvP1, cv::Size(40,40) );
-		//cv::GaussianBlur(cvP2, cvP1, cv::Size(45,45), 0);
-		cv::accumulateWeighted(cvP2,cvOut,opacitys[opacityI]);
+		cv::medianBlur( cvP2, cvP1, 5 );
+		cv::accumulateWeighted(cvP1,cvOut,opacitys[opacityI]);
 	}	
 }
 
