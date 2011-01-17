@@ -31,42 +31,56 @@ public:
 	cv::Mat			cvBlurredP3;
 	cv::Mat			previousFrameBlurred;
 	float minChange,maxChange;
+	float change,changeDrifted;
 	float minChangeDrifted,maxChangeDrifted;
 	float changeScalar,previousChangeScalar;
-	static const float changeDrift=1/100.0f;
+	float changeScalarClamped;
+	static const float changeDrift=1/10.0f;
+	static const float maxOpacity=1/1.0f;
 	float opacity;
-	float Opacity;
-	static const float opacityIntertia=1/10.0f;
+	float opacityIntertia;
 	int camWidth, camHeight;
 	int camY;
 	static const int opacityN=6;
 	float opacityMax;
 	static const float diffScale=16;
+	const static float slowMow=16;
 	int diffWidth, diffHeight;
 	bool firstFrame;
-	qtime::MovieWriter	mMovieWriter;
+	qtime::MovieWriter mMovieWriter;
 	bool wroteFrame;
 	bool debug;
+	bool showFramerate;
 	float time;
 	float oldTimer;
 	float previousChange;
 	float totalDuration;
+	int camFrameCount;
+	static const int LOGlimit=640;
+	int LOGCurrent;
+	int LOGcount;
+	float LOGcountF;
+	float LOGchangeScalarClamped[LOGlimit];
+	int lLimit;
+	int pleaseQuitCount;
+	bool pleaseQuit;
 };
 
 void ocvCaptureApp::setup()
 {
+	lLimit=LOGlimit;
 	firstFrame=true;
-	wroteFrame=false;
+	pleaseQuit=wroteFrame=false;
 	minChange=maxChange=-1;
-	opacityMax = 1/6.0f;
-	oldTimer=changeScalar=totalDuration=previousChange=previousChangeScalar=opacity=0;
+	opacityIntertia=1/10.0f;
+	LOGcountF=pleaseQuitCount=camFrameCount=LOGcount=LOGCurrent=change=changeDrifted=oldTimer=changeScalar=totalDuration=previousChange=previousChangeScalar=opacity=0;
 	mCapI=1;
 	setFrameRate(400);
 	int camWidth=640;
 	int camH=camHeight=480;
 	vector<Capture::DeviceRef> devices( Capture::getDevices() );
 	for( vector<Capture::DeviceRef>::const_iterator deviceIt = devices.begin(); deviceIt != devices.end(); ++deviceIt ) {
-		Capture::DeviceRef device = *deviceIt;
+		Capture::DeviceRef device =*deviceIt;
 		console() << "Found Device " << device->getName() << " ID: " << device->getUniqueId() << std::endl;
 		try {
 			if( device->checkAvailable() ) {
@@ -91,6 +105,7 @@ void ocvCaptureApp::setup()
 		format.setCodec( qtime::MovieWriter::CODEC_MP4);
 		format.setQuality( 0.9f );
 		format.setDefaultDuration(1/20.0f);
+		format.enableReordering(false);
 		mMovieWriter = qtime::MovieWriter( path, camWidth, camHeight, format );
 	}
 	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3);
@@ -101,7 +116,7 @@ void ocvCaptureApp::setup()
 	previousFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
 	cvBlurredP3 = cv::Mat(diffWidth,diffHeight,CV_32FC3);
 	setWindowSize(camWidth, camHeight);
-	debug=true;
+	showFramerate=debug=true;
 	hideCursor();
 	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
@@ -110,7 +125,8 @@ void ocvCaptureApp::setup()
 
 void ocvCaptureApp::update()
 {
-	if( mCapture && mCapture.checkNewFrame() ) {
+	if(camFrameCount>1 && mCapture && mCapture.checkNewFrame() ) {
+		bool quickStart=totalDuration<200;
 		Surface surface=mCapture.getSurface();
 		cv::Mat rgb=toOcv( surface ,CV_8UC3);
 		rgb.adjustROI(-camY, -camY, 0,0);
@@ -144,59 +160,82 @@ void ocvCaptureApp::update()
 		cv::medianBlur( cvBlurredP3, cvBlurredP3, 5 );
 		cv::GaussianBlur(cvBlurredP3, thisFrameBlurred , cv::Size(15,15), 0);
 		float changeRange=0;
-		float changeRangeDrifted=0;
+		float drift=0;
+		float changeRangeDrifted;
 		if (!firstFrame) {
 			cv::absdiff(thisFrameBlurred,previousFrameBlurred,cvBlurredP3);
 			cv::Scalar changes=cv::sum(cvBlurredP3);
-			float change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
-			change=(change*opacityIntertia)+(previousChange*(1-opacityIntertia));
+			change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
+			changeDrifted=quickStart?change:(change*opacityIntertia)+(previousChange*(1-opacityIntertia));
 			previousChange=change;
-			if (minChange<0)
-				minChangeDrifted=maxChangeDrifted=minChange=maxChange=change;
+			if (minChange<0) {
+				minChangeDrifted=maxChangeDrifted=minChange=maxChange=changeDrifted;
+			}
 			else {
-				if (change<minChange)
-					minChange=(change*opacityIntertia)+(minChange*(1-opacityIntertia));
-				if (change>maxChange) 
-					maxChange=(change*opacityIntertia)+(maxChange*(1-opacityIntertia));
-				if (change<minChangeDrifted)
-					minChangeDrifted=(change*opacityIntertia)+(minChangeDrifted*(1-opacityIntertia));
-				if (change>maxChangeDrifted) 
-					maxChangeDrifted=(change*opacityIntertia)+(maxChangeDrifted*(1-opacityIntertia));
+				if (changeDrifted<minChange)
+					minChange=quickStart?changeDrifted:(changeDrifted*opacityIntertia)+(minChange*(1-opacityIntertia));
+				if (changeDrifted>maxChange) 
+					maxChange=quickStart?changeDrifted:(changeDrifted*opacityIntertia)+(maxChange*(1-opacityIntertia));
+				if (changeDrifted<minChangeDrifted)
+					minChangeDrifted=quickStart?changeDrifted:(changeDrifted*opacityIntertia)+(minChangeDrifted*(1-opacityIntertia));
+				if (changeDrifted>maxChangeDrifted) 
+					maxChangeDrifted=quickStart?changeDrifted:(changeDrifted*opacityIntertia)+(maxChangeDrifted*(1-opacityIntertia));
 			}
 			changeRange=maxChange-minChange;
-			changeRangeDrifted=maxChangeDrifted-minChangeDrifted;
-			if (changeRangeDrifted>0 && (change-minChangeDrifted)>0)
-				changeScalar=(change-minChangeDrifted)/changeRangeDrifted;
-			else
-				changeScalar=0;
+			changeRange=1/(maxChange-minChange);
+			
 		}
 		thisFrameBlurred.copyTo(previousFrameBlurred);
-		float drift=changeDrift*changeRangeDrifted;
-		if (changeRangeDrifted>changeRange/10) {
+		drift=changeDrift*changeRangeDrifted;
+		float oldmaxChangeDrifted=maxChangeDrifted;
+		if (maxChangeDrifted>minChangeDrifted+maxChange/10) 
 			maxChangeDrifted-=drift;
-			minChangeDrifted+=drift;	
-		}
-		changeScalar-=(1-changeScalar)*drift;
+		if (changeRangeDrifted<oldmaxChangeDrifted-maxChange/10) 
+			minChangeDrifted+=drift;
+		changeRangeDrifted=maxChangeDrifted-minChangeDrifted;
+		if (changeRangeDrifted>0 && (changeDrifted-minChangeDrifted)>0)
+			changeScalar=(changeDrifted-minChangeDrifted)/changeRangeDrifted;
+		else
+			changeScalar=0;
 		changeScalar=(changeScalar*opacityIntertia)+(previousChangeScalar*(1-opacityIntertia));
 		previousChangeScalar=changeScalar;
-		if (changeScalar>1)
-			changeScalar=1;
-		else if (changeScalar<0)
-			changeScalar=0;
-		opacity=changeScalar*opacityMax;
-				if (opacity>0);
-		cv::accumulateWeighted(cvP2,cvOut,opacity);
-		if (getElapsedFrames()>50 && mMovieWriter&& !firstFrame && changeScalar>0) {
-			float duration=time-oldTimer;
-			mMovieWriter.addFrame( fromOcv( cvOut ),changeScalar*duration) ;
-			wroteFrame=true;
-			totalDuration+=duration;
+		changeScalar=pow(changeScalar,2);
+		changeScalarClamped=changeScalar-0.5f;
+		changeScalarClamped*=1+1/100.0f;
+		changeScalarClamped+=0.5;
+		if (changeScalarClamped>1)
+			changeScalarClamped=1;
+		else if (changeScalarClamped<0)
+			changeScalarClamped=0;
+		float duration=time-oldTimer;
+		opacity=maxOpacity*changeScalar;
+		duration*=slowMow*changeScalarClamped;
+		float doubleFrameRate=2/getFrameRate();
+		if (duration>2/getFrameRate())
+			duration=doubleFrameRate;
+		if (!pleaseQuit && mMovieWriter && camFrameCount>10 && opacity>0) {
+			cv::accumulateWeighted(cvP2,cvOut,opacity);
+			if (duration>0) {
+				mMovieWriter.addFrame( fromOcv( cvOut ),duration) ;
+				wroteFrame=true;
+				LOGcountF+=min(changeScalarClamped*10,1.0f);
+				LOGcount=floor(LOGcountF);
+				LOGCurrent=LOGcount%lLimit;
+				LOGchangeScalarClamped[LOGCurrent]=changeScalarClamped;
+				totalDuration+=duration;
+			}
 		}
 		oldTimer=time;
 		time=getElapsedSeconds();
 		firstFrame=false;
 	}
-	
+	camFrameCount++;
+	if (pleaseQuit)
+		pleaseQuitCount++;
+	if (pleaseQuitCount>2)
+		mMovieWriter.finish();
+	if (pleaseQuitCount>4)
+		AppBasic::quit();
 }
 
 
@@ -218,6 +257,11 @@ void ocvCaptureApp::keyDown( KeyEvent event )
 		mCapture.start();
 	} else if(event.getChar() == 'd' )
 		debug=!debug;
+	else if(event.getChar() == 'r' )
+		showFramerate=!showFramerate;
+	else if(mMovieWriter && event.getChar() == 'q' ) {
+		pleaseQuit=true;
+	}
 } 
 
 void ocvCaptureApp::draw()
@@ -226,23 +270,49 @@ void ocvCaptureApp::draw()
 	gl::setViewport( getWindowBounds() );
 	gl::color(Color(1.0f,1.0f,1.0f));
 	gl::draw( fromOcv( cvOut ), getWindowBounds());
-	if (getElapsedFrames()>1 && debug) {
-		float width=diffWidth*10;
-		gl::draw( fromOcv( thisFrameBlurred), Rectf(0,110,width,110+diffHeight*10 ));
-		gl::color(Color(0.0f,0.0f,0.0f));
-		gl::drawSolidRect(Rectf(0.0f,0.0f,width, 110));
-		gl::color(Color(1,1-changeScalar,1-changeScalar));
-		gl::drawSolidRect(Rectf(0.0f,0.0f,width*changeScalar, 110));
-		gl::drawString ("changeScalar="+toString(changeScalar),  Vec2f(0,30));
-		gl::drawString ("totalDuration="+toString(totalDuration),  Vec2f(0,50));
-		gl::drawString ("Frame rate="+toString(getAverageFps()),  Vec2f(0,70));
-		gl::drawString ("changeRangeDrifted="+toString(maxChangeDrifted-minChangeDrifted),  Vec2f(0,90));
+	if (showFramerate)
+		gl::drawString ("Frame rate="+toString(getAverageFps()),  Vec2f(5,100));
+	if (debug) {
+		float h=150;
+		int n=5;
+		gl::color(Color(1.0f,1.0f,1.0f));
+		gl::draw( fromOcv( thisFrameBlurred), Rectf(0,h,diffWidth*10,h+diffHeight*10 ));
+		gl::drawString ("totalDuration="+toString(totalDuration),  Vec2f(5,40));
+		gl::drawString ("changeScalarClamped="+toString(changeScalarClamped),  Vec2f(5,70));
+		gl::drawString ("show debug = 'd' show framerate = 'r' toggle fullscreen= 'f' toggle camera 'c' quit = 'q'",  Vec2f(5,130));
 		if (wroteFrame) {
-			gl::drawString ("###RECORDING###",  Vec2f(0,10));
-			wroteFrame=!wroteFrame;
+			wroteFrame=false;
+			gl::drawString ("RECORDING!",  Vec2f(5,10));
+			gl::color(Color(0.0f,0.0f,0.0f));
+			for (int i=0;i<=n;i++) {
+				float y=(i/(float)n)*h;
+				gl::drawLine(Vec2f(0,y),Vec2f(getWindowWidth(),y));
+			}
+			gl::color(Color(1.0f,0.0f,0.0f));
+			if (changeScalarClamped>0) {
+				for (int i=0;i<=n;i++) {
+					float y=(i/(float)n)*h;
+					gl::drawLine(Vec2f(0,y),Vec2f(getWindowWidth()*changeScalarClamped,y));
+				}
+				gl::drawLine(Vec2f(getWindowWidth()*changeScalarClamped,0),Vec2f(getWindowWidth()*changeScalarClamped,h));
+			}
 		}
-		
+		gl::color(Color(1.0f,0.0f,0.0f));
+		float ys=h;
+		float xs=getWindowWidth()/(float)lLimit;
+		for (int i=0;i<min(LOGcount,lLimit-1);i++) {
+			int iL1=((lLimit+LOGcount)-i)%lLimit;
+			int iL2=((lLimit+LOGcount)-(i+1))%lLimit;
+			if (i>0&&iL1>0&&iL2>0) {
+				float LOG1changeScalarClamped=LOGchangeScalarClamped[iL1];
+				float LOG2changeScalarClamped=LOGchangeScalarClamped[iL2];
+				float x1=i*xs;
+				float x2=(i+1)*xs;
+				gl::drawLine(Vec2f(x1,h*LOG1changeScalarClamped),Vec2f(x2,h*LOG2changeScalarClamped));
+			}
+		}						   
 	}
+	glEnd();
 }
 
 
