@@ -31,10 +31,9 @@ public:
 	vector<Capture>	mCaptures;
 	Capture			mCapture;
 	int				mCapI;
-	//cv::Mat			cvOut;
+	cv::Mat			cvOut;
 	cv::Mat			cvP1;
 	cv::Mat			cvP2;
-	cv::Mat			cvP3;
 	cv::Mat			thisFrameBlurred;
 	cv::Mat			cvBlurredP3;
 	cv::Mat			previousFrameBlurred;
@@ -46,16 +45,14 @@ public:
 	int camFrameCount;
 	static const float changeDrift=1/100.0f;
 	static const float opacityIntertia=1/6.0f;
-	static const int windowL=41;
+	static const int windowL=40;
 	float windowA[windowL];
 	float windowT;
 	static const int cvL=20;
 	vector<cv::Mat>	cvOutL;
 	int cvNowI;
 	int cvThenI;
-	float cvThenF;
-	float cvDrawF;
-	static const float maxOpacity=1/4.0f;
+	static const float maxOpacity=1/10.0f;
 	int camWidth, camHeight;
 	int camY;
 	static const float diffScale=16;
@@ -120,7 +117,7 @@ void ocvCaptureApp::setup()
 	wroteFrame=pleaseQuit=false;
 	minChangeDrifted=maxChangeDrifted=minChange=maxChange=0.5f;
 	changeScalar=1;
-	cvDrawF=cvThenF=previousChangeScalar=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
+	previousChangeScalar=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
 	int camWidth=640;
 	int camH=camHeight=480;
 	vector<Capture::DeviceRef> devices( Capture::getDevices() );
@@ -157,8 +154,7 @@ void ocvCaptureApp::setup()
 	}
 	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3);
 	cvP2=cv::Mat(camHeight,camWidth,CV_32FC3);
-	cvP3=cv::Mat(camHeight,camWidth,CV_32FC3);
-	//cvOut = cv::Mat(camHeight,camWidth,CV_32FC3);
+	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3);
 	for (int n=0;n<cvL+1;n++)
 		cvOutL.push_back(cv::Mat(camHeight,camWidth,CV_32FC3));
 	thisFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
@@ -203,8 +199,6 @@ void ocvCaptureApp::update()
 		cv::Mat bgr[] = { blue,green	,red};
 		cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
 		cv::flip(cvP1,cvP2,1);
-		//cvP2.copyTo(cvP3);
-		//cvP2.copyTo(cvOutL[cvNowI]);
 		cv::resize(cvP2,cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
 		cv::medianBlur( cvBlurredP3, cvBlurredP3, 5 );
 		cv::GaussianBlur(cvBlurredP3, thisFrameBlurred , cv::Size(15,15), 0);
@@ -213,7 +207,7 @@ void ocvCaptureApp::update()
 			cvNowI=0;
 		if (++cvThenI>cvL)
 			cvThenI=0;
-		//cvOut.copyTo(cvOutL[cvNowI]);
+		cvP2.copyTo(cvOutL[cvNowI]);
 		
 		
 		float changeRange=0;
@@ -271,37 +265,24 @@ void ocvCaptureApp::update()
 			else if (changeScalar<0)
 				changeScalar=0;
 			changeScalar*=changeScalar;
-			opacity=(changeScalar*changeScalar)*maxOpacity;
+			opacity=changeScalar*maxOpacity;
 			if (opacity>0) {
-				//cv::accumulateWeighted(cvP2,cvOut,opacity);
-				cv::accumulateWeighted(cvP2,cvOutL[cvNowI],opacity);
+				cv::accumulateWeighted(cvOutL[cvThenI],cvOut,opacity);
 			}
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=time-oldTimer;
-			if (oldTimer>0) {
-				cvDrawF+=(realDuration*10);
-				while (cvDrawF>cvL) {
-					cvDrawF-=cvL;
-				}
-			}
 			//console() << " realDuration=" << toString(realDuration*cvL) << " cvDrawF=" << toString(cvDrawF) << endl;
-			
-			float duration=realDuration;
+			float duration=oldTimer>0?realDuration:0;
 			duration*=changeScalar;
 			if (mMovieWriter && camFrameCount>30 && opacity>0 && duration>0) {
-				if (oldTimer>0) {
-					cvThenF+=(duration*10);
-					while (cvThenF>cvL) {
-						cvThenF-=cvL;
-					}
-				}
-				ImageSourceRef image = fromOcv(cvOutL[(int)floor(cvThenF)]);
+				ImageSourceRef image = fromOcv(cvOut);
 				if (image) {	
 					mMovieWriter.addFrame(image ,duration) ;
 					
 					wroteFrame=true;
-					totalDuration+=duration;
+					if (oldTimer>0)
+						totalDuration+=duration;
 					speed=duration/realDuration;
 				}
 				
@@ -367,7 +348,7 @@ void ocvCaptureApp::draw()
 		gl::color(Color(1.0f,1.0f,1.0f));
 		
 		
-		ImageSourceRef image = fromOcv(cvOutL[(int)floor(cvDrawF)]);
+		ImageSourceRef image = fromOcv(cvOut);
 		if (image) {
 			gl::draw( image, bounds);
 		}
