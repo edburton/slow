@@ -31,9 +31,9 @@ public:
 	vector<Capture>	mCaptures;
 	Capture			mCapture;
 	int				mCapI;
-	cv::Mat			cvOut;
 	cv::Mat			cvP1;
 	cv::Mat			cvP2;
+	cv::Mat			cvOut;
 	cv::Mat			thisFrameBlurred;
 	cv::Mat			cvBlurredP3;
 	cv::Mat			previousFrameBlurred;
@@ -43,19 +43,18 @@ public:
 	float changeScalar,previousChangeScalar;
 	float opacity;
 	int camFrameCount;
-	static const float changeDrift=1/100.0f;
-	static const float opacityIntertia=1/6.0f;
-	static const int windowL=40;
+	static const float changeDrift=1/64.0f;
+	static const int windowL=16;
 	float windowA[windowL];
 	float windowT;
-	static const int cvL=20;
-	vector<cv::Mat>	cvOutL;
+	static const int cvL=8;
+	vector<cv::Mat>	cvInL;
 	int cvNowI;
 	int cvThenI;
-	static const float maxOpacity=1/10.0f;
+	static const float maxOpacity=1.0f/8;
 	int camWidth, camHeight;
 	int camY;
-	static const float diffScale=16;
+	static const float diffScale=8;
 	int diffWidth, diffHeight;
 	bool firstFrame;
 	qtime::MovieWriter	mMovieWriter;
@@ -154,16 +153,16 @@ void ocvCaptureApp::setup()
 	}
 	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3);
 	cvP2=cv::Mat(camHeight,camWidth,CV_32FC3);
-	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3);
 	for (int n=0;n<cvL+1;n++)
-		cvOutL.push_back(cv::Mat(camHeight,camWidth,CV_32FC3));
+		cvInL.push_back(cv::Mat(camHeight,camWidth,CV_32FC3));
+	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3);
 	thisFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
 	previousFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
 	cvBlurredP3 = cv::Mat(diffWidth,diffHeight,CV_32FC3);
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=true;
-	//hideCursor();
-	//setFullScreen(true);
+	showFramerate=debug=false;
+	hideCursor();
+	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
 	mCapture.start();
 }
@@ -207,8 +206,7 @@ void ocvCaptureApp::update()
 			cvNowI=0;
 		if (++cvThenI>cvL)
 			cvThenI=0;
-		cvP2.copyTo(cvOutL[cvNowI]);
-		
+		cvP2.copyTo(cvInL[cvNowI]);
 		
 		float changeRange=0;
 		float changeRangeDrifted=0;
@@ -227,21 +225,21 @@ void ocvCaptureApp::update()
 			}
 			change=t/windowT;
 			
-			if (camFrameCount<400)
-				change=0.5f*((400-camFrameCount)/400.0f)+change*(camFrameCount/400.0f);
+			if (camFrameCount<100)
+				change=0.5f*((100-camFrameCount)/100.0f)+change*(camFrameCount/100.0f);
 			LOG[1][0][LOGi]=change;
 			if (change>minChange)
 				minChange=(change*(changeDrift/2))+(minChange*(1-(changeDrift/2)));
 			else
-				minChange=(change*(opacityIntertia))+(minChange*(1-(opacityIntertia)));
+				minChange=change;
 			if (change<maxChange) 
-				maxChange=(change*(changeDrift/2))+(maxChange*(1-(changeDrift/2)));
+				maxChange=(change*(changeDrift/4))+(maxChange*(1-(changeDrift/4)));
 			else
-				maxChange=(change*(opacityIntertia))+(maxChange*(1-(opacityIntertia)));
+				maxChange=change;
 			if (change<minChangeDrifted)
-				minChangeDrifted=(change*opacityIntertia)+(minChangeDrifted*(1-opacityIntertia));
+				minChangeDrifted=change;
 			if (change>maxChangeDrifted) 
-				maxChangeDrifted=(change*opacityIntertia)+(maxChangeDrifted*(1-opacityIntertia));
+				maxChangeDrifted=change;
 			
 			changeRange=maxChange-minChange;
 			changeRangeDrifted=maxChangeDrifted-minChangeDrifted;
@@ -255,10 +253,9 @@ void ocvCaptureApp::update()
 		
 		firstFrame=false;
 		if (camFrameCount>20) {
-			
-			float drift=changeDrift*changeRangeDrifted;
-			if (changeRangeDrifted>changeRange/10)
-				maxChangeDrifted-=drift;
+			float drift=sqrt(changeDrift)*changeRangeDrifted;
+			drift*=drift;
+			maxChangeDrifted-=drift;
 			minChangeDrifted+=drift;	
 			if (changeScalar>1)
 				changeScalar=1;
@@ -266,26 +263,24 @@ void ocvCaptureApp::update()
 				changeScalar=0;
 			changeScalar*=changeScalar;
 			opacity=changeScalar*maxOpacity;
-			if (opacity>0) {
-				cv::accumulateWeighted(cvOutL[cvThenI],cvOut,opacity);
-			}
+			if (camFrameCount<=20+cvL*4)
+				opacity=changeScalar=0.25;
+			if (opacity>0)
+				cv::accumulateWeighted(cvInL[cvThenI],cvOut,opacity);
 			oldTimer=time;
 			time=getElapsedSeconds();
-			float realDuration=time-oldTimer;
-			//console() << " realDuration=" << toString(realDuration*cvL) << " cvDrawF=" << toString(cvDrawF) << endl;
-			float duration=oldTimer>0?realDuration:0;
+			float realDuration=oldTimer>0?time-oldTimer:0;
+			//console() << "getFpsSampleInterval()=" << toString(getFpsSampleInterval()) << endl;
+			float duration=realDuration;
 			duration*=changeScalar;
-			if (mMovieWriter && camFrameCount>30 && opacity>0 && duration>0) {
+			if (mMovieWriter && opacity>0 && duration>0) {
+				totalDuration+=duration;
+				speed=duration/realDuration;
 				ImageSourceRef image = fromOcv(cvOut);
-				if (image) {	
+				if (camFrameCount>20+cvL*4 && image) {
 					mMovieWriter.addFrame(image ,duration) ;
-					
 					wroteFrame=true;
-					if (oldTimer>0)
-						totalDuration+=duration;
-					speed=duration/realDuration;
 				}
-				
 			}
 			else
 				speed=0;
@@ -311,9 +306,9 @@ void ocvCaptureApp::update()
 }
 
 void ocvCaptureApp::updateLOG() {
-	LOGi=++LOGi%LOGlength;
 	for (int s=1;s<LOGs;s++)
 		LOG[1][s][LOGi]=*LOGp[s];
+	LOGi=++LOGi%LOGlength;
 }
 
 void ocvCaptureApp::keyDown( KeyEvent event )
@@ -346,24 +341,25 @@ void ocvCaptureApp::draw()
 		Area bounds=getWindowBounds() ;
 		gl::setViewport( bounds  );
 		gl::color(Color(1.0f,1.0f,1.0f));
-		
-		
 		ImageSourceRef image = fromOcv(cvOut);
 		if (image) {
 			gl::draw( image, bounds);
 		}
-		
-		
 		if (showFramerate)
 			gl::drawStringRight ("Frame rate="+toString(getAverageFps()),  Vec2f(bounds.getWidth()-5,bounds.getHeight()-20),Color(1.0f,0.0f,0.0f));
 		if (debug) {
+			ImageSourceRef image = fromOcv(thisFrameBlurred);
+			if (image) {
+				gl::draw( image, Rectf(0,0,bounds.getWidth()/4,bounds.getHeight()/4));
+			}
 			gl::color(Color(1.0f,0.0f,0.0f));
-			float gY=bounds.getHeight()/3;
-			float gHeight=bounds.getHeight()/3;
+			float gY=bounds.getHeight()/2;
+			float gHeight=bounds.getHeight()/4;
 			gl::drawLine(Vec2f(0,gY),Vec2f(bounds.getWidth(),gY));
 			gl::drawLine(Vec2f(0,gY+gHeight),Vec2f(bounds.getWidth(),gY+gHeight));
 			float sw=bounds.getWidth()/(LOGlength-1.0f);
-			int i1=LOGi;
+			int i=LOGi-1>0?LOGi-1:LOGlength-1;
+			int i1=i;
 			int i2=i1>0?i1-1:LOGlength-1;
 			for (int i=0;i<LOGlength-1;i++) {
 				for (int s=0;s<LOGs;s++) {
@@ -380,16 +376,15 @@ void ocvCaptureApp::draw()
 			}
 			float ly=gY+5;
 			for (int s=0;s<LOGs;s++) {
-				gl::drawStringRight (toString(LOG[1][s][LOGi])+"<-"+LOGlable[s],  Vec2f(bounds.getWidth()-5,ly),LOGc[s]);
+				gl::drawStringRight (toString(LOG[1][s][i])+"<-"+LOGlable[s],  Vec2f(bounds.getWidth()-5,ly),LOGc[s]);
 				ly+=20;
 			}
-			gl::drawString("Duration="+toString(totalDuration),  Vec2f(5,5),Color(1.0f,0.0f,0.0f));
-			gl::drawString("Speed="+toString(speed),  Vec2f(5,25),Color(1.0f,0.0f,0.0f));
+			gl::drawStringRight(toString(totalDuration)+"<-Duration",  Vec2f(bounds.getWidth()-5,5),Color(1.0f,0.0f,0.0f));
+			gl::drawStringRight(toString(speed)+"<-Speed",  Vec2f(bounds.getWidth()-5,25),Color(1.0f,0.0f,0.0f));
 			if (wroteFrame)
-				gl::drawString(">RECORDING!",  Vec2f(5,45),Color(1.0f,0.0f,0.0f));
+				gl::drawStringRight(">RECORDING!",  Vec2f(bounds.getWidth()-5,45),Color(1.0f,0.0f,0.0f));
 		}
 	} catch (exception & ) {console() << "draw ouch" << endl;}
 }
-
 
 CINDER_APP_BASIC( ocvCaptureApp, RendererGl )
