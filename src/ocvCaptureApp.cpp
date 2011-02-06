@@ -34,9 +34,10 @@ public:
 	cv::Mat			cvP1;
 	cv::Mat			cvP2;
 	cv::Mat			cvOut;
-	cv::Mat			thisFrameBlurred;
 	cv::Mat			cvBlurredP3;
-	cv::Mat			previousFrameBlurred;
+	vector<cv::Mat>	cvInput;
+	vector<cv::Mat>	cvBlurredThumbnails;
+	cv::Mat cvLastSmoothedThumbnail;
 	float change;
 	float minChange,maxChange;
 	float minChangeDrifted,maxChangeDrifted;
@@ -44,13 +45,12 @@ public:
 	float opacity;
 	int camFrameCount;
 	static const float changeDrift=1/64.0f;
-	static const int windowL=16;
-	float windowA[windowL];
-	float windowT;
-	static const int cvL=8;
-	vector<cv::Mat>	cvInL;
-	int cvNowI;
-	int cvThenI;
+	static const int smoothLength=9;
+	float windowA[smoothLength];
+	int smoothPeakPosition;
+	int cvOutputNow;
+	int cvOutputThen;
+	int cvBlurredThumbnailNow;
 	static const float maxOpacity=1.0f/8;
 	int camWidth, camHeight;
 	int camY;
@@ -81,15 +81,23 @@ public:
 
 void ocvCaptureApp::setup()
 {
-	cvNowI=0;
-	cvThenI=1;
-	windowT=0;
-	for (int i=0;i<windowL;i++) {
-		float x=(i/(windowL-1.0f))-0.5f;
-		x*=M_PI*2;
-		x=(cos(x)+1)/2;
-		windowT+=windowA[i]=x;
+	cvBlurredThumbnailNow=cvOutputNow=0;
+	cvOutputThen=1;
+	float maxT=-1;
+	float total=0;
+	for (int i=0;i<smoothLength;i++) {
+		float x=(i+0.5f)/(float)(smoothLength);
+		x=sin(x*M_PI);
+		x*=x;
+		windowA[i]=x;
+		total+=x;
+		if (x>maxT) {
+			smoothPeakPosition=i;
+			maxT=x;
+		}
 	}
+	for (int i=0;i<smoothLength;i++)
+		windowA[i]/=total;
 	int c=0;
 	LOGlable[c]="change";
 	LOGp[c++]=&change;
@@ -151,18 +159,19 @@ void ocvCaptureApp::setup()
 		format.setDefaultDuration(1/10.0f);
 		mMovieWriter = qtime::MovieWriter( path, camWidth, camHeight, format );
 	}
-	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3);
-	cvP2=cv::Mat(camHeight,camWidth,CV_32FC3);
-	for (int n=0;n<cvL+1;n++)
-		cvInL.push_back(cv::Mat(camHeight,camWidth,CV_32FC3));
-	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3);
-	thisFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
-	previousFrameBlurred = cv::Mat(diffWidth,diffHeight,CV_32FC3);
-	cvBlurredP3 = cv::Mat(diffWidth,diffHeight,CV_32FC3);
+	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
+	cvP2=cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
+	for (int n=0;n<smoothPeakPosition+1;n++)
+		cvInput.push_back(cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0)));
+	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
+	cvBlurredP3 = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
+	for (int n=0;n<smoothLength+1;n++)
+		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
+	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=false;
-	hideCursor();
-	setFullScreen(true);
+	showFramerate=debug=true;
+	//hideCursor();
+	//setFullScreen(true);
 	mCapture=mCaptures[mCapI];
 	mCapture.start();
 }
@@ -197,33 +206,38 @@ void ocvCaptureApp::update()
 		int from_to[] = { 0,0,  1,1,  2,2 };
 		cv::Mat bgr[] = { blue,green	,red};
 		cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
-		cv::flip(cvP1,cvP2,1);
-		cv::resize(cvP2,cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
-		cv::medianBlur( cvBlurredP3, cvBlurredP3, 5 );
-		cv::GaussianBlur(cvBlurredP3, thisFrameBlurred , cv::Size(15,15), 0);
-		
-		if (++cvNowI>cvL)
-			cvNowI=0;
-		if (++cvThenI>cvL)
-			cvThenI=0;
-		cvP2.copyTo(cvInL[cvNowI]);
-		
+		cvOutputNow=++cvOutputNow%smoothPeakPosition;
+		cvOutputThen=++cvOutputThen%smoothPeakPosition;
+		cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
+		cv::flip(cvP1,cvInput[cvOutputNow],1);
+		cv::resize(cvP1,cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
+		cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(9,9), 0);
 		float changeRange=0;
 		float changeRangeDrifted=0;
 		
 		if (!firstFrame) {
-			cv::absdiff(thisFrameBlurred,previousFrameBlurred,cvBlurredP3);
+			int index=cvBlurredThumbnailNow;
+			cv::Mat cvThisSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
+			for (int i=0;i<smoothLength;i++) {
+				cv::accumulateWeighted(cvBlurredThumbnails[index],cvThisSmoothedThumbnail,windowA[i]);
+				if (--index<0)
+					index=smoothLength;
+			}
+			cv::absdiff(cvThisSmoothedThumbnail,cvLastSmoothedThumbnail,cvBlurredP3);
 			cv::Scalar changes=cv::sum(cvBlurredP3);
 			change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
 			LOG[1][0][LOGi]=LOG[0][0][LOGi]=change;
+			
+			cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
+			
 			int i=LOGi;
 			float t=0;
-			for (int n=0;n<windowL;n++) {
+			for (int n=0;n<smoothLength;n++) {
 				t+=LOG[0][0][i]*windowA[n];
 				if (--i<0)
 					i=LOGlength-1;
 			}
-			change=t/windowT;
+			change=t;
 			
 			if (camFrameCount<100)
 				change=0.5f*((100-camFrameCount)/100.0f)+change*(camFrameCount/100.0f);
@@ -249,10 +263,9 @@ void ocvCaptureApp::update()
 				changeScalar=0;
 			
 		}
-		thisFrameBlurred.copyTo(previousFrameBlurred);
 		
 		firstFrame=false;
-		if (camFrameCount>20) {
+		if (camFrameCount>20+smoothLength) {
 			float drift=sqrt(changeDrift)*changeRangeDrifted;
 			drift*=drift;
 			maxChangeDrifted-=drift;
@@ -263,21 +276,20 @@ void ocvCaptureApp::update()
 				changeScalar=0;
 			changeScalar*=changeScalar;
 			opacity=changeScalar*maxOpacity;
-			if (camFrameCount<=20+cvL*4)
+			if (camFrameCount<=20+smoothPeakPosition*2)
 				opacity=changeScalar=0.25;
 			if (opacity>0)
-				cv::accumulateWeighted(cvInL[cvThenI],cvOut,opacity);
+				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
-			//console() << "getFpsSampleInterval()=" << toString(getFpsSampleInterval()) << endl;
 			float duration=realDuration;
 			duration*=changeScalar;
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
 				speed=duration/realDuration;
 				ImageSourceRef image = fromOcv(cvOut);
-				if (camFrameCount>20+cvL*4 && image) {
+				if (camFrameCount>20+smoothPeakPosition*4 && image) {
 					mMovieWriter.addFrame(image ,duration) ;
 					wroteFrame=true;
 				}
@@ -348,9 +360,9 @@ void ocvCaptureApp::draw()
 		if (showFramerate)
 			gl::drawStringRight ("Frame rate="+toString(getAverageFps()),  Vec2f(bounds.getWidth()-5,bounds.getHeight()-20),Color(1.0f,0.0f,0.0f));
 		if (debug) {
-			ImageSourceRef image = fromOcv(thisFrameBlurred);
+			ImageSourceRef image = fromOcv(cvLastSmoothedThumbnail);
 			if (image) {
-				gl::draw( image, Rectf(0,0,bounds.getWidth()/4,bounds.getHeight()/4));
+				gl::draw( image, Rectf(0,0,bounds.getWidth()/2,bounds.getHeight()/2));
 			}
 			gl::color(Color(1.0f,0.0f,0.0f));
 			float gY=bounds.getHeight()/2;
