@@ -182,7 +182,7 @@ void ocvCaptureApp::setup()
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=true;
+	showFramerate=debug=false;
 	hideCursor();
 	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
@@ -312,7 +312,7 @@ void ocvCaptureApp::update()
 			else if (changeScalar<0)
 				changeScalar=0;
 			changeScalar*=changeScalar;
-			opacity=changeScalar*maxOpacity;
+			opacity=changeScalar*changeScalar*maxOpacity;
 			if (opacity>0)
 				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
 			oldTimer=time;
