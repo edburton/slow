@@ -39,19 +39,24 @@ public:
 	vector<cv::Mat>	cvBlurredThumbnails;
 	cv::Mat cvLastSmoothedThumbnail;
 	float change;
+	float changeThreshold;
+	float changeSoftRange;
+	float changeRangeK;
+	float changeFieldK;
+	float changeLift;
+	float changeFriction;
 	float minChange,maxChange;
-	float minChangeDrifted,maxChangeDrifted;
+	float minChangeV,maxChangeV;
 	float changeScalar,previousChangeScalar;
 	float opacity;
 	int camFrameCount;
-	static const float changeDrift=1/64.0f;
-	static const int smoothLength=9;
+	static const int smoothLength=15;
 	float windowA[smoothLength];
 	int smoothPeakPosition;
 	int cvOutputNow;
 	int cvOutputThen;
 	int cvBlurredThumbnailNow;
-	static const float maxOpacity=1.0f/8;
+	static const float maxOpacity=1.0f/10;
 	int camWidth, camHeight;
 	int camY;
 	static const float diffScale=8;
@@ -69,7 +74,7 @@ public:
 	float speed;
 	int framesWritten;
 	static const int LOGlength=640;
-	static const int LOGs=6;
+	static const int LOGs=4;
 	int LOGi;
 	float LOG[2][LOGs][LOGlength];
 	string LOGlable[LOGs];
@@ -81,6 +86,12 @@ public:
 
 void ocvCaptureApp::setup()
 {
+	changeThreshold=0.4f;
+	changeSoftRange=0.0f;
+	changeRangeK=1/100.0f;
+	changeLift=1/100.0f;
+	changeFieldK=1/400.0f;
+	changeFriction=1-1/4.0f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
 	float maxT=-1;
@@ -105,10 +116,6 @@ void ocvCaptureApp::setup()
 	LOGp[c++]=&minChange;
 	LOGlable[c]="maxChange";
 	LOGp[c++]=&maxChange;
-	LOGlable[c]="minChangeDrifted";
-	LOGp[c++]=&minChangeDrifted;
-	LOGlable[c]="maxChangeDrifted";
-	LOGp[c++]=&maxChangeDrifted;
 	LOGlable[c]="changeScalar";
 	LOGp[c++]=&changeScalar;
 	for (int n=0;n<2;n++)
@@ -122,9 +129,9 @@ void ocvCaptureApp::setup()
 	}
 	firstFrame=true;
 	wroteFrame=pleaseQuit=false;
-	minChangeDrifted=maxChangeDrifted=minChange=maxChange=0.5f;
+	minChange=maxChange=0.5f;
 	changeScalar=1;
-	previousChangeScalar=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
+	minChangeV=maxChangeV=previousChangeScalar=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
 	int camWidth=640;
 	int camH=camHeight=480;
 	vector<Capture::DeviceRef> devices( Capture::getDevices() );
@@ -169,9 +176,9 @@ void ocvCaptureApp::setup()
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=true;
-	//hideCursor();
-	//setFullScreen(true);
+	showFramerate=debug=false;
+	hideCursor();
+	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
 	mCapture.start();
 }
@@ -180,7 +187,7 @@ void ocvCaptureApp::update()
 {
 	wroteFrame=false;
 	//try {
-	if(!pleaseQuit && camFrameCount>10 && mCapture && mCapture.checkNewFrame() ) {
+	if(!pleaseQuit && mCapture && mCapture.checkNewFrame() ) {
 		Surface surface=mCapture.getSurface();
 		cv::Mat rgb=toOcv( surface ,CV_8UC3);
 		rgb.adjustROI(-camY, -camY, 0,0);
@@ -210,11 +217,10 @@ void ocvCaptureApp::update()
 		cvOutputThen=++cvOutputThen%smoothPeakPosition;
 		cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
 		cv::flip(cvP1,cvInput[cvOutputNow],1);
-		cv::resize(cvP1,cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
-		cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(9,9), 0);
+		cv::resize(cvInput[cvOutputNow],cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
+		cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(15,15), 0);
 		float changeRange=0;
-		float changeRangeDrifted=0;
-		
+		float previousChange=change;
 		if (!firstFrame) {
 			int index=cvBlurredThumbnailNow;
 			cv::Mat cvThisSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
@@ -237,28 +243,53 @@ void ocvCaptureApp::update()
 				if (--i<0)
 					i=LOGlength-1;
 			}
-			change=t;
-			
+
+						
+			change=t-changeThreshold;
 			if (camFrameCount<100)
 				change=0.5f*((100-camFrameCount)/100.0f)+change*(camFrameCount/100.0f);
 			LOG[1][0][LOGi]=change;
-			if (change>minChange)
-				minChange=(change*(changeDrift/2))+(minChange*(1-(changeDrift/2)));
-			else
-				minChange=change;
-			if (change<maxChange) 
-				maxChange=(change*(changeDrift/4))+(maxChange*(1-(changeDrift/4)));
-			else
-				maxChange=change;
-			if (change<minChangeDrifted)
-				minChangeDrifted=change;
-			if (change>maxChangeDrifted) 
-				maxChangeDrifted=change;
 			
+			
+			float d=(maxChange-minChange)-changeSoftRange;
+			
+			
+			minChangeV+=changeLift;
+			minChangeV+=d*changeRangeK;
+			maxChangeV-=d*changeRangeK;
+			minChangeV*=changeFriction;
+			maxChangeV*=changeFriction;
+			minChange+=minChangeV;
+			maxChange+=maxChangeV;
+			if (change<minChange) {
+				minChange=change;
+				//minChangeV=0;//-abs(minChangeV);
+			}
+			if (change>maxChange) {
+				maxChange=change;
+				//maxChangeV=0;//abs(maxChangeV);
+			}
+			float changeChange=change-previousChange;
+			float absChangeChange=abs(changeChange);
+			//console() << "changeChange=" << toString(changeChange) << endl;
+			
+			if (absChangeChange>0) {
+				absChangeChange=sqrt(absChangeChange);
+				float dMin=(change+.1f)-minChange;
+				if (dMin>0) {
+					float fMin=(absChangeChange*changeFieldK)/(dMin*dMin);
+					minChangeV-=fMin;
+				}
+				float dMax=maxChange-(change-.1f);
+				if (dMax>0) {
+					float fMax=(absChangeChange*changeFieldK)/(dMax*dMax);
+					maxChangeV+=fMax;
+				}
+			}
+						
 			changeRange=maxChange-minChange;
-			changeRangeDrifted=maxChangeDrifted-minChangeDrifted;
-			if (changeRangeDrifted>0)
-				changeScalar=(change-minChangeDrifted)/changeRangeDrifted;
+			if (changeRange>0 && change>0)
+				changeScalar=(change-(minChange>0?minChange:0))/changeRange;
 			else
 				changeScalar=0;
 			
@@ -266,10 +297,6 @@ void ocvCaptureApp::update()
 		
 		firstFrame=false;
 		if (camFrameCount>20+smoothLength) {
-			float drift=sqrt(changeDrift)*changeRangeDrifted;
-			drift*=drift;
-			maxChangeDrifted-=drift;
-			minChangeDrifted+=drift;	
 			if (changeScalar>1)
 				changeScalar=1;
 			else if (changeScalar<0)
@@ -283,7 +310,7 @@ void ocvCaptureApp::update()
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
-			float duration=realDuration;
+			float duration=realDuration*1.5f;
 			duration*=changeScalar;
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
@@ -360,15 +387,23 @@ void ocvCaptureApp::draw()
 		if (showFramerate)
 			gl::drawStringRight ("Frame rate="+toString(getAverageFps()),  Vec2f(bounds.getWidth()-5,bounds.getHeight()-20),Color(1.0f,0.0f,0.0f));
 		if (debug) {
-			ImageSourceRef image = fromOcv(cvLastSmoothedThumbnail);
+			ImageSourceRef image = fromOcv(cvInput[cvOutputThen]);
 			if (image) {
-				gl::draw( image, Rectf(0,0,bounds.getWidth()/2,bounds.getHeight()/2));
+				gl::draw( image, Rectf(0,bounds.getHeight()/4,bounds.getWidth()/4,bounds.getHeight()/2));
+			}
+			image = fromOcv(cvLastSmoothedThumbnail);
+			if (image) {
+				gl::draw( image, Rectf(bounds.getWidth()/4,bounds.getHeight()/4,bounds.getWidth()/2,bounds.getHeight()/2));
 			}
 			gl::color(Color(1.0f,0.0f,0.0f));
 			float gY=bounds.getHeight()/2;
 			float gHeight=bounds.getHeight()/4;
 			gl::drawLine(Vec2f(0,gY),Vec2f(bounds.getWidth(),gY));
 			gl::drawLine(Vec2f(0,gY+gHeight),Vec2f(bounds.getWidth(),gY+gHeight));
+			float thresh=(gY+gHeight)-(-changeThreshold*gHeight);
+			gl::color(Color(0.5f,0.0f,0.0f));
+			gl::drawLine(Vec2f(0,thresh),Vec2f(bounds.getWidth(),thresh));
+			gl::color(Color(1.0f,0.0f,0.0f));
 			float sw=bounds.getWidth()/(LOGlength-1.0f);
 			int i=LOGi-1>0?LOGi-1:LOGlength-1;
 			int i1=i;
