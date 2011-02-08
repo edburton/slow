@@ -56,7 +56,7 @@ public:
 	int cvOutputNow;
 	int cvOutputThen;
 	int cvBlurredThumbnailNow;
-	static const float maxOpacity=1.0f/10;
+	static const float maxOpacity=1.0f/6;
 	int camWidth, camHeight;
 	int camY;
 	static const float diffScale=8;
@@ -88,9 +88,9 @@ void ocvCaptureApp::setup()
 {
 	changeThreshold=0.4f;
 	changeSoftRange=0.0f;
-	changeRangeK=1/100.0f;
-	changeLift=1/100.0f;
-	changeFieldK=1/400.0f;
+	changeRangeK=1/50.0f;
+	changeLift=1/1000.0f;
+	changeFieldK=1.0f;
 	changeFriction=1-1/4.0f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
@@ -243,17 +243,13 @@ void ocvCaptureApp::update()
 				if (--i<0)
 					i=LOGlength-1;
 			}
-
-						
+			
 			change=t-changeThreshold;
 			if (camFrameCount<100)
-				change=0.5f*((100-camFrameCount)/100.0f)+change*(camFrameCount/100.0f);
+				change=changeThreshold*((100-camFrameCount)/100.0f)+change*(camFrameCount/100.0f);
 			LOG[1][0][LOGi]=change;
 			
-			
 			float d=(maxChange-minChange)-changeSoftRange;
-			
-			
 			minChangeV+=changeLift;
 			minChangeV+=d*changeRangeK;
 			maxChangeV-=d*changeRangeK;
@@ -263,48 +259,44 @@ void ocvCaptureApp::update()
 			maxChange+=maxChangeV;
 			if (change<minChange) {
 				minChange=change;
-				//minChangeV=0;//-abs(minChangeV);
 			}
 			if (change>maxChange) {
 				maxChange=change;
-				//maxChangeV=0;//abs(maxChangeV);
 			}
 			float changeChange=change-previousChange;
 			float absChangeChange=abs(changeChange);
 			//console() << "changeChange=" << toString(changeChange) << endl;
 			
 			if (absChangeChange>0) {
-				absChangeChange=sqrt(absChangeChange);
-				float dMin=(change+.1f)-minChange;
-				if (dMin>0) {
-					float fMin=(absChangeChange*changeFieldK)/(dMin*dMin);
-					minChangeV-=fMin;
-				}
-				float dMax=maxChange-(change-.1f);
-				if (dMax>0) {
-					float fMax=(absChangeChange*changeFieldK)/(dMax*dMax);
-					maxChangeV+=fMax;
-				}
+				absChangeChange=absChangeChange;
+				float dMin=((change)-minChange)*20;
+				if (dMin<0)
+					dMin=0;
+				float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
+				//console() << "dMin=" << toString(dMin)<< " fMin=" << toString(fMin) << endl;
+				minChangeV-=fMin;
+				float dMax=(maxChange-(change))*20;
+				if (dMax<0)
+					dMax=0;
+				float fMax=(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
+				maxChangeV+=fMax;
 			}
-						
+			
 			changeRange=maxChange-minChange;
 			if (changeRange>0 && change>0)
 				changeScalar=(change-(minChange>0?minChange:0))/changeRange;
 			else
 				changeScalar=0;
-			
 		}
 		
 		firstFrame=false;
-		if (camFrameCount>20+smoothLength) {
+		if (camFrameCount>smoothLength+2) {
 			if (changeScalar>1)
 				changeScalar=1;
 			else if (changeScalar<0)
 				changeScalar=0;
 			changeScalar*=changeScalar;
 			opacity=changeScalar*maxOpacity;
-			if (camFrameCount<=20+smoothPeakPosition*2)
-				opacity=changeScalar=0.25;
 			if (opacity>0)
 				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
 			oldTimer=time;
@@ -316,7 +308,7 @@ void ocvCaptureApp::update()
 				totalDuration+=duration;
 				speed=duration/realDuration;
 				ImageSourceRef image = fromOcv(cvOut);
-				if (camFrameCount>20+smoothPeakPosition*4 && image) {
+				if (smoothPeakPosition*4 && image) {
 					mMovieWriter.addFrame(image ,duration) ;
 					wroteFrame=true;
 				}
