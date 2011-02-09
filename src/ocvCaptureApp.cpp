@@ -49,12 +49,13 @@ public:
 	float changeFriction;
 	float minChange,maxChange;
 	float minChangeV,maxChangeV;
-	float changeScalar,previousChangeScalar;
+	float changeScalar;
 	float opacity;
 	int camFrameCount;
 	static const int smoothLength=15;
 	float windowA[smoothLength];
 	int smoothPeakPosition;
+	int camDelay;
 	int cvOutputNow;
 	int cvOutputThen;
 	int cvBlurredThumbnailNow;
@@ -111,23 +112,25 @@ void ocvCaptureApp::setup()
 			maxT=x;
 		}
 	}
+	camDelay=(int)round(smoothPeakPosition*2.5f); //should be 3? not sure why 2.5 works better
+	console() << "smoothLength=" << toString(smoothLength)<< " smoothPeakPosition=" << toString(smoothPeakPosition) << endl;
 	for (int i=0;i<smoothLength;i++)
 		windowA[i]/=total;
 	int c=0;
 	LOGlable[c]="change";
 	LOGp[c++]=&change;
+	LOGlable[c]="changeScalar";
+	LOGp[c++]=&changeScalar;
 	LOGlable[c]="changeGrounded";
 	LOGp[c++]=&changeGrounded;
 	LOGlable[c]="minChange";
 	LOGp[c++]=&minChange;
 	LOGlable[c]="maxChange";
 	LOGp[c++]=&maxChange;
-	LOGlable[c]="changeScalar";
-	LOGp[c++]=&changeScalar;
 	for (int n=0;n<2;n++)
 		for (int i=0;i<LOGlength;i++) 
 			for (int s=0;s<LOGs;s++)
-				LOG[n][s][i]=s==0;//0 used for change smoothing
+				LOG[n][s][i]=0;//0 used for change smoothing, 1 for changeScalar smoothing 
 	
 	for (int s=0;s<LOGs;s++) {
 		float h=s*(1.0f/LOGs);
@@ -137,7 +140,7 @@ void ocvCaptureApp::setup()
 	wroteFrame=pleaseQuit=false;
 	minChange=maxChange=0.5f;
 	changeScalar=1;
-	changeGrounded=minChangeV=maxChangeV=previousChangeScalar=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
+	changeGrounded=minChangeV=maxChangeV=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
 	int camWidth=640;
 	int camH=camHeight=480;
 	vector<Capture::DeviceRef> devices( Capture::getDevices() );
@@ -174,7 +177,7 @@ void ocvCaptureApp::setup()
 	}
 	cvP1=cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
 	cvP2=cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
-	for (int n=0;n<smoothPeakPosition+1;n++)
+	for (int n=0;n<camDelay;n++)
 		cvInput.push_back(cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvOut = cv::Mat(camHeight,camWidth,CV_32FC3,cv::Scalar(0,0,0));
 	cvBlurredP3 = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
@@ -182,9 +185,9 @@ void ocvCaptureApp::setup()
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=false;
-	hideCursor();
-	setFullScreen(true);
+	showFramerate=debug=true;
+	//hideCursor();
+	//setFullScreen(true);
 	mCapture=mCaptures[mCapI];
 	mCapture.start();
 }
@@ -219,8 +222,8 @@ void ocvCaptureApp::update()
 		int from_to[] = { 0,0,  1,1,  2,2 };
 		cv::Mat bgr[] = { blue,green	,red};
 		cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
-		cvOutputNow=++cvOutputNow%smoothPeakPosition;
-		cvOutputThen=++cvOutputThen%smoothPeakPosition;
+		cvOutputNow=++cvOutputNow%camDelay;
+		cvOutputThen=++cvOutputThen%camDelay;
 		cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
 		cv::flip(cvP1,cvInput[cvOutputNow],1);
 		cv::resize(cvInput[cvOutputNow],cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
@@ -249,10 +252,10 @@ void ocvCaptureApp::update()
 			cv::absdiff(cvThisSmoothedThumbnail,cvLastSmoothedThumbnail,cvBlurredP3);
 			cv::Scalar changes=cv::sum(cvBlurredP3);
 			change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
-			LOG[0][0][LOGi]=change;
 			
 			cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
 			
+			LOG[0][0][LOGi]=change;
 			int i=LOGi;
 			float t=0;
 			for (int n=0;n<smoothLength;n++) {
@@ -306,25 +309,37 @@ void ocvCaptureApp::update()
 		}
 		
 		firstFrame=false;
-		if (camFrameCount>smoothLength+2) {
+		if (camFrameCount>camDelay) {
 			if (changeScalar>1)
 				changeScalar=1;
 			else if (changeScalar<0)
 				changeScalar=0;
 			changeScalar*=changeScalar;
+			
+			LOG[0][1][LOGi]=changeScalar;
+			int ix=LOGi;
+			t=0;
+			for (int n=0;n<smoothLength;n++) {
+				t+=LOG[0][1][ix]*windowA[n];
+				if (--ix<0)
+					ix=LOGlength-1;
+			}
+			changeScalar=LOG[1][1][LOGi]=t;
+			
+			
 			opacity=changeScalar*changeScalar*maxOpacity;
 			if (opacity>0)
 				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
-			float duration=realDuration;
+			float duration=sqrt(2.0f)*realDuration;
 			duration*=changeScalar;
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
 				speed=duration/realDuration;
 				ImageSourceRef image = fromOcv(cvOut);
-				if (smoothPeakPosition*4 && image) {
+				if (image) {
 					mMovieWriter.addFrame(image ,duration) ;
 					wroteFrame=true;
 				}
@@ -353,8 +368,8 @@ void ocvCaptureApp::update()
 }
 
 void ocvCaptureApp::updateLOG() {
-	for (int s=1;s<LOGs;s++)
-		LOG[1][s][LOGi]=*LOGp[s];
+	for (int s=2;s<LOGs;s++)
+		LOG[0][s][LOGi]=LOG[1][s][LOGi]=*LOGp[s];
 	LOGi=++LOGi%LOGlength;
 }
 
@@ -425,6 +440,10 @@ void ocvCaptureApp::draw()
 					float y1=(gY+gHeight)-(LOG[1][s][i1]*gHeight);
 					float y2=(gY+gHeight)-(LOG[1][s][i2]*gHeight);
 					gl::drawLine(Vec2f(x,y1),Vec2f(x+sw,y2));
+					//float yy1=(gY+gHeight)-(LOG[0][s][i1]*gHeight);
+					//float yy2=(gY+gHeight)-(LOG[0][s][i2]*gHeight);
+					//gl::drawLine(Vec2f(x,yy1),Vec2f(x+sw,yy2));
+					//gl::drawLine(Vec2f(x,y1),Vec2f(x,yy1));
 				}
 				if (--i1<0)
 					i1=LOGlength-1;
