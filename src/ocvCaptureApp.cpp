@@ -47,6 +47,7 @@ public:
 	float changeFieldK;
 	float changeLift;
 	float changeFriction;
+	float absoluteMaxChange;
 	float minChange,maxChange;
 	float minChangeV,maxChangeV;
 	float changeScalar;
@@ -75,6 +76,7 @@ public:
 	float duration;
 	float totalDuration;
 	float speed;
+	float maxSpeed;
 	int framesWritten;
 	static const int LOGlength=640;
 	static const int LOGs=5;
@@ -89,8 +91,9 @@ public:
 
 void ocvCaptureApp::setup()
 {
+	maxSpeed=sqrt(2.0f);
 	changeThresholdMin=100;
-	changeThresholdMargin=0.05f;
+	changeThresholdMargin=0.1f;
 	changeSoftRange=0.0f;
 	changeRangeK=1/10.0f;
 	changeLift=1/1000.0f;
@@ -98,7 +101,6 @@ void ocvCaptureApp::setup()
 	changeFriction=1/3.0f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
-	changeThresholdMin=1;
 	float maxT=-1;
 	float total=0;
 	for (int i=0;i<smoothLength;i++) {
@@ -140,7 +142,7 @@ void ocvCaptureApp::setup()
 	wroteFrame=pleaseQuit=false;
 	minChange=maxChange=0.5f;
 	changeScalar=1;
-	changeGrounded=minChangeV=maxChangeV=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
+	absoluteMaxChange=changeGrounded=minChangeV=maxChangeV=opacity=t=speed=camFrameCount=LOGi=mCapI=time=oldTimer=change=framesWritten=duration=totalDuration=pleaseQuitCount=opacity=0;
 	int camWidth=640;
 	int camH=camHeight=480;
 	vector<Capture::DeviceRef> devices( Capture::getDevices() );
@@ -185,9 +187,10 @@ void ocvCaptureApp::setup()
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=debug=true;
-	//hideCursor();
-	//setFullScreen(true);
+	showFramerate=true;
+	debug=false;
+	hideCursor();
+	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
 	mCapture.start();
 }
@@ -195,121 +198,120 @@ void ocvCaptureApp::setup()
 void ocvCaptureApp::update()
 {
 	wroteFrame=false;
-	//try {
-	if(!pleaseQuit && mCapture && mCapture.checkNewFrame() ) {
-		Surface surface=mCapture.getSurface();
-		cv::Mat rgb=toOcv( surface ,CV_8UC3);
-		rgb.adjustROI(-camY, -camY, 0,0);
-		vector<cv::Mat> planes;
-		split(rgb, planes);
-		cv::Scalar  sums=cv::mean(rgb);
-		float max=0;
-		for (int i=0;i<3;i++)
-			if (sums[i]>max)
-				max=sums[i];
-		float v[3];
-		for (int i=0;i<3;i++)
-			v[i]=(sums[i]/max);
-		cv::Mat blue(planes[0]),b;
-		cv::equalizeHist(blue, b);
-		cv::Mat green(planes[1]),g;
-		cv::equalizeHist(green, g);
-		cv::Mat red(planes[2]),r;
-		cv::equalizeHist(red, r);
-		r.convertTo(red, CV_32FC1,v[2]/255.0f);
-		g.convertTo(green, CV_32FC1,v[1]/255.0f);
-		b.convertTo(blue, CV_32FC1,v[0]/255.0f);
-		int from_to[] = { 0,0,  1,1,  2,2 };
-		cv::Mat bgr[] = { blue,green	,red};
-		cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
-		cvOutputNow=++cvOutputNow%camDelay;
-		cvOutputThen=++cvOutputThen%camDelay;
-		cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
-		cv::flip(cvP1,cvInput[cvOutputNow],1);
-		cv::resize(cvInput[cvOutputNow],cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
-		cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(15,15), 0);
-		float changeRange=0;
-		float previousChange=changeGrounded;
-		int indx=LOGi;
-		changeThresholdMin=-1;
-		int l=LOGlength;
-		if (l>camFrameCount)
-			l=camFrameCount;
-		for (int i=0;i<l;i++) {
-			if (changeThresholdMin<0 || LOG[1][0][indx]<changeThresholdMin)
-				changeThresholdMin= LOG[1][0][indx];
-			if (--indx<0)
-				indx=LOGlength-1;
-		}
-		if (!firstFrame) {
-			int index=cvBlurredThumbnailNow;
-			cv::Mat cvThisSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
-			for (int i=0;i<smoothLength;i++) {
-				cv::accumulateWeighted(cvBlurredThumbnails[index],cvThisSmoothedThumbnail,windowA[i]);
-				if (--index<0)
-					index=smoothLength;
+	try {
+		if(!pleaseQuit && mCapture && mCapture.checkNewFrame() ) {
+			Surface surface=mCapture.getSurface();
+			cv::Mat rgb=toOcv( surface ,CV_8UC3);
+			rgb.adjustROI(-camY, -camY, 0,0);
+			vector<cv::Mat> planes;
+			split(rgb, planes);
+			cv::Scalar  sums=cv::mean(rgb);
+			float max=0;
+			for (int i=0;i<3;i++)
+				if (sums[i]>max)
+					max=sums[i];
+			float v[3];
+			for (int i=0;i<3;i++)
+				v[i]=(sums[i]/max);
+			cv::Mat blue(planes[0]),b;
+			cv::equalizeHist(blue, b);
+			cv::Mat green(planes[1]),g;
+			cv::equalizeHist(green, g);
+			cv::Mat red(planes[2]),r;
+			cv::equalizeHist(red, r);
+			r.convertTo(red, CV_32FC1,v[2]/255.0f);
+			g.convertTo(green, CV_32FC1,v[1]/255.0f);
+			b.convertTo(blue, CV_32FC1,v[0]/255.0f);
+			int from_to[] = { 0,0,  1,1,  2,2 };
+			cv::Mat bgr[] = { blue,green	,red};
+			cv::mixChannels(bgr,3,&cvP1,1,from_to,3);
+			cvOutputNow=++cvOutputNow%camDelay;
+			cvOutputThen=++cvOutputThen%camDelay;
+			cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
+			cv::flip(cvP1,cvInput[cvOutputNow],1);
+			cv::resize(cvInput[cvOutputNow],cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
+			cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(15,15), 0);
+			float changeRange=0;
+			float previousChange=changeGrounded;
+			int indx=LOGi;
+			if (!firstFrame) {
+				int index=cvBlurredThumbnailNow;
+				cv::Mat cvThisSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
+				for (int i=0;i<smoothLength;i++) {
+					cv::accumulateWeighted(cvBlurredThumbnails[index],cvThisSmoothedThumbnail,windowA[i]);
+					if (--index<0)
+						index=smoothLength;
+				}
+				cv::absdiff(cvThisSmoothedThumbnail,cvLastSmoothedThumbnail,cvBlurredP3);
+				cv::Scalar changes=cv::sum(cvBlurredP3);
+				change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
+				cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
+				if (change>absoluteMaxChange)
+					absoluteMaxChange=change;
+				
+				changeThresholdMin=-1;
+				for (int i=0;i<LOGlength;i++) {
+					if (--indx<0)
+						indx=LOGlength-1;
+					if ((changeThresholdMin<0 || LOG[1][0][indx]<changeThresholdMin) && LOG[1][0][indx]>0)
+						changeThresholdMin= LOG[1][0][indx];			
+				}
+				LOG[0][0][LOGi]=change;
+				int i=LOGi;
+				float t=0;
+				int c=0;
+				for (int n=0;n<smoothLength;n++) {
+					float f=LOG[0][0][i];
+					if (f>0) {
+						t+=f*windowA[n];
+						c++;
+					}
+					if (--i<0)
+						i=LOGlength-1;
+				}
+				if (c==smoothLength)
+					LOG[1][0][LOGi]=t;
+				//console() << "LOG[1][0][LOGi]=" << toString(LOG[1][0][LOGi]) << endl;
+				changeGrounded=t-(changeThresholdMin+changeThresholdMargin);
+				
+				float d=(maxChange-minChange)-changeSoftRange;
+				minChangeV+=changeLift;
+				minChangeV+=d*changeRangeK;
+				maxChangeV-=d*changeRangeK;
+				minChangeV*=changeFriction;
+				maxChangeV*=changeFriction;
+				minChange+=minChangeV;
+				maxChange+=maxChangeV;
+				if (changeGrounded<minChange) {
+					minChange=changeGrounded;
+				}
+				if (changeGrounded>maxChange) {
+					maxChange=changeGrounded;
+				}
+				float changeChange=changeGrounded-previousChange;
+				float absChangeChange=abs(changeChange);
+				if (absChangeChange>0) {
+					absChangeChange=sqrt(absChangeChange);
+					float dMin=((changeGrounded)-minChange)*100;
+					if (dMin<0)
+						dMin=0;
+					float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
+					minChangeV-=fMin;
+					float dMax=(maxChange-(changeGrounded))*100;
+					if (dMax<0)
+						dMax=0;
+					float fMax=(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
+					maxChangeV+=fMax;
+				}
+				float minChangeZeroed=minChange<0?0:minChange;
+				changeRange=maxChange-minChangeZeroed;
+				if (changeRange>0 && changeGrounded>0)
+					changeScalar=(changeGrounded-minChangeZeroed)/changeRange;
+				else
+					changeScalar=0;
 			}
-			cv::absdiff(cvThisSmoothedThumbnail,cvLastSmoothedThumbnail,cvBlurredP3);
-			cv::Scalar changes=cv::sum(cvBlurredP3);
-			change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
 			
-			cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
-			
-			LOG[0][0][LOGi]=change;
-			int i=LOGi;
-			float t=0;
-			for (int n=0;n<smoothLength;n++) {
-				t+=LOG[0][0][i]*windowA[n];
-				if (--i<0)
-					i=LOGlength-1;
-			}
-			LOG[1][0][LOGi]=t;
-			changeGrounded=t-(changeThresholdMin+changeThresholdMargin);
-			if (camFrameCount<100)
-				changeGrounded=1*((100-camFrameCount)/100.0f)+changeGrounded*(camFrameCount/100.0f);
-			
-			float d=(maxChange-minChange)-changeSoftRange;
-			minChangeV+=changeLift;
-			minChangeV+=d*changeRangeK;
-			maxChangeV-=d*changeRangeK;
-			minChangeV*=changeFriction;
-			maxChangeV*=changeFriction;
-			minChange+=minChangeV;
-			maxChange+=maxChangeV;
-			if (changeGrounded<minChange) {
-				minChange=changeGrounded;
-			}
-			if (changeGrounded>maxChange) {
-				maxChange=changeGrounded;
-			}
-			float changeChange=changeGrounded-previousChange;
-			float absChangeChange=abs(changeChange);
-			//console() << "changeChange=" << toString(changeChange) << endl;
-			
-			if (absChangeChange>0) {
-				absChangeChange=sqrt(absChangeChange);
-				float dMin=((changeGrounded)-minChange)*100;
-				if (dMin<0)
-					dMin=0;
-				float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
-				//console() << "dMin=" << toString(dMin)<< " fMin=" << toString(fMin) << endl;
-				minChangeV-=fMin;
-				float dMax=(maxChange-(changeGrounded))*100;
-				if (dMax<0)
-					dMax=0;
-				float fMax=(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
-				maxChangeV+=fMax;
-			}
-			float minChangeZeroed=minChange<0?0:minChange;
-			changeRange=maxChange-minChangeZeroed;
-			if (changeRange>0 && changeGrounded>0)
-				changeScalar=(changeGrounded-minChangeZeroed)/changeRange;
-			else
-				changeScalar=0;
-		}
-		
-		firstFrame=false;
-		if (camFrameCount>camDelay) {
+			firstFrame=false;
 			if (changeScalar>1)
 				changeScalar=1;
 			else if (changeScalar<0)
@@ -333,7 +335,7 @@ void ocvCaptureApp::update()
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
-			float duration=sqrt(2.0f)*realDuration;
+			float duration=maxSpeed*realDuration;
 			duration*=changeScalar;
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
@@ -346,10 +348,9 @@ void ocvCaptureApp::update()
 			}
 			else
 				speed=0;
+			updateLOG();
 		}
-		updateLOG();
-	}
-	//} catch (exception & ) {console() << "update ouch" << endl;}
+	} catch (exception & ) {console() << "update ouch" << endl;}
 	camFrameCount++;
 	if (pleaseQuit)
 		pleaseQuitCount++;
@@ -407,17 +408,34 @@ void ocvCaptureApp::draw()
 		if (image) {
 			gl::draw( image, bounds);
 		}
-		if (showFramerate)
-			gl::drawStringRight ("Frame rate="+toString(getAverageFps()),  Vec2f(bounds.getWidth()-5,bounds.getHeight()-20),Color(1.0f,0.0f,0.0f));
+		if (showFramerate) {
+			gl::drawStringRight (toString(getAverageFps())+"<-Frame rate",  Vec2f(bounds.getWidth()-5,5),Color(0.25f,0.0f,0.0f));
+			gl::drawStringRight(toString(speed)+"<-Speed",  Vec2f(bounds.getWidth()-5,25),Color(0.25f,0.0f,0.0f));
+			gl::drawStringRight(toString(totalDuration)+"<-Duration",  Vec2f(bounds.getWidth()-5,45),Color(0.25f,0.0f,0.0f));
+			if (wroteFrame) {
+				string rs="RECORDING";
+				float r=(speed/maxSpeed);
+				float l=r*(bounds.getWidth()/2);
+				gl::drawStringRight("RECORDING<",  Vec2f(bounds.getWidth()-(5+l),65),Color(0.25f,0.0f,0.0f));
+				gl::color(Color(0.5f-(r/2),0.0f,0.0f));
+				gl::drawSolidRect(Rectf(bounds.getWidth()-(5+l),65,bounds.getWidth()-5,75));
+				gl::color(Color(1.0f,1.0f,1.0f));
+			}
+		}
 		if (debug) {
-			ImageSourceRef image = fromOcv(cvInput[cvOutputThen]);
+			ImageSourceRef image = fromOcv(cvInput[cvOutputNow]);
 			if (image) {
-				gl::draw( image, Rectf(0,bounds.getHeight()/4,bounds.getWidth()/4,bounds.getHeight()/2));
+				gl::draw( image, Rectf(0,0,bounds.getWidth()/4,bounds.getHeight()/4));
 			}
 			image = fromOcv(cvLastSmoothedThumbnail);
 			if (image) {
+				gl::draw( image, Rectf(0,bounds.getHeight()/4,bounds.getWidth()/4,bounds.getHeight()/2));
+			}
+			image = fromOcv(cvInput[cvOutputThen]);
+			if (image) {
 				gl::draw( image, Rectf(bounds.getWidth()/4,bounds.getHeight()/4,bounds.getWidth()/2,bounds.getHeight()/2));
 			}
+			
 			gl::color(Color(1.0f,0.0f,0.0f));
 			float gY=bounds.getHeight()/2;
 			float gHeight=bounds.getHeight()/4;
@@ -440,10 +458,6 @@ void ocvCaptureApp::draw()
 					float y1=(gY+gHeight)-(LOG[1][s][i1]*gHeight);
 					float y2=(gY+gHeight)-(LOG[1][s][i2]*gHeight);
 					gl::drawLine(Vec2f(x,y1),Vec2f(x+sw,y2));
-					//float yy1=(gY+gHeight)-(LOG[0][s][i1]*gHeight);
-					//float yy2=(gY+gHeight)-(LOG[0][s][i2]*gHeight);
-					//gl::drawLine(Vec2f(x,yy1),Vec2f(x+sw,yy2));
-					//gl::drawLine(Vec2f(x,y1),Vec2f(x,yy1));
 				}
 				if (--i1<0)
 					i1=LOGlength-1;
@@ -455,10 +469,6 @@ void ocvCaptureApp::draw()
 				gl::drawStringRight (toString(LOG[1][s][i])+"<-"+LOGlable[s],  Vec2f(bounds.getWidth()-5,ly),LOGc[s]);
 				ly+=20;
 			}
-			gl::drawStringRight(toString(totalDuration)+"<-Duration",  Vec2f(bounds.getWidth()-5,5),Color(1.0f,0.0f,0.0f));
-			gl::drawStringRight(toString(speed)+"<-Speed",  Vec2f(bounds.getWidth()-5,25),Color(1.0f,0.0f,0.0f));
-			if (wroteFrame)
-				gl::drawStringRight(">RECORDING!",  Vec2f(bounds.getWidth()-5,45),Color(1.0f,0.0f,0.0f));
 		}
 	} catch (exception & ) {console() << "draw ouch" << endl;}
 }
