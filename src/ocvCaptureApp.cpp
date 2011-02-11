@@ -26,7 +26,6 @@ public:
 	void update();
 	void keyDown( KeyEvent event );
 	void draw();
-	void updateLOG();
 	
 	vector<Capture>	mCaptures;
 	Capture			mCapture;
@@ -115,7 +114,7 @@ void ocvCaptureApp::setup()
 		}
 	}
 	camDelay=(int)round(smoothPeakPosition*2.5f); //should be 3? not sure why 2.5 works better
-	console() << "smoothLength=" << toString(smoothLength)<< " smoothPeakPosition=" << toString(smoothPeakPosition) << endl;
+	//console() << "smoothLength=" << toString(smoothLength)<< " smoothPeakPosition=" << toString(smoothPeakPosition) << endl;
 	for (int i=0;i<smoothLength;i++)
 		windowA[i]/=total;
 	int c=0;
@@ -187,7 +186,7 @@ void ocvCaptureApp::setup()
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
 	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
-	showFramerate=true;
+	showFramerate=false;
 	debug=false;
 	hideCursor();
 	setFullScreen(true);
@@ -348,7 +347,9 @@ void ocvCaptureApp::update()
 			}
 			else
 				speed=0;
-			updateLOG();
+			for (int s=2;s<LOGs;s++)
+				LOG[0][s][LOGi]=LOG[1][s][LOGi]=*LOGp[s];
+			LOGi=++LOGi%LOGlength;
 		}
 	} catch (exception & ) {console() << "update ouch" << endl;}
 	camFrameCount++;
@@ -366,12 +367,8 @@ void ocvCaptureApp::update()
 	}
 	if (pleaseQuitCount==3)
 		AppBasic::quit();
-}
-
-void ocvCaptureApp::updateLOG() {
-	for (int s=2;s<LOGs;s++)
-		LOG[0][s][LOGi]=LOG[1][s][LOGi]=*LOGp[s];
-	LOGi=++LOGi%LOGlength;
+	if (camFrameCount%100==0)
+		console() << toString(getAverageFps())+"<-Frame rate" << endl;
 }
 
 void ocvCaptureApp::keyDown( KeyEvent event )
