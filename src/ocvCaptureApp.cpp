@@ -68,6 +68,7 @@ public:
 	qtime::MovieWriter	mMovieWriter;
 	bool debug;
 	bool showFramerate;
+	bool showValues;
 	float time;
 	float oldTimer;
 	int pleaseQuitCount;
@@ -94,10 +95,10 @@ void ocvCaptureApp::setup()
 	changeThresholdMin=100;
 	changeThresholdMargin=0.1f;
 	changeSoftRange=0.0f;
-	changeRangeK=1/10.0f;
-	changeLift=1/1000.0f;
-	changeFieldK=2.0f;
-	changeFriction=1/3.0f;
+	changeRangeK=1/8.0f;
+	changeLift=1/400.0f;
+	changeFieldK=2;
+	changeFriction=0.2f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
 	float maxT=-1;
@@ -134,7 +135,9 @@ void ocvCaptureApp::setup()
 				LOG[n][s][i]=0;//0 used for change smoothing, 1 for changeScalar smoothing 
 	
 	for (int s=0;s<LOGs;s++) {
-		float h=s*(1.0f/LOGs);
+		float h=(s-1)*(1.0f/(LOGs-1));
+		if (h<0)
+			h=0;
 		LOGc[s]=Color( CM_HSV, h, 1.0f, 1.0f );
 	}
 	firstFrame=true;
@@ -188,6 +191,7 @@ void ocvCaptureApp::setup()
 	setWindowSize(camWidth, camHeight);
 	showFramerate=false;
 	debug=false;
+	showValues=false;
 	hideCursor();
 	setFullScreen(true);
 	mCapture=mCaptures[mCapI];
@@ -291,15 +295,15 @@ void ocvCaptureApp::update()
 				float absChangeChange=abs(changeChange);
 				if (absChangeChange>0) {
 					absChangeChange=sqrt(absChangeChange);
-					float dMin=((changeGrounded)-minChange)*100;
+					float dMin=((changeGrounded)-minChange)*400;
 					if (dMin<0)
 						dMin=0;
 					float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
 					minChangeV-=fMin;
-					float dMax=(maxChange-(changeGrounded))*100;
+					float dMax=(maxChange-(changeGrounded))*400;
 					if (dMax<0)
 						dMax=0;
-					float fMax=(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
+					float fMax=0.5f*(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
 					maxChangeV+=fMax;
 				}
 				float minChangeZeroed=minChange<0?0:minChange;
@@ -367,8 +371,8 @@ void ocvCaptureApp::update()
 	}
 	if (pleaseQuitCount==3)
 		AppBasic::quit();
-	if (camFrameCount%100==0)
-		console() << toString(getAverageFps())+"<-Frame rate" << endl;
+	//if (camFrameCount%100==0)
+	//	console() << toString(getAverageFps())+"<-Frame rate" << endl;
 }
 
 void ocvCaptureApp::keyDown( KeyEvent event )
@@ -391,6 +395,8 @@ void ocvCaptureApp::keyDown( KeyEvent event )
 		debug=!debug;
 	else if(event.getChar() == 'r' )
 		showFramerate=!showFramerate;
+	else if(event.getChar() == 'v' )
+		showValues=!showValues;
 	else if(event.getChar() == 'q' )
 		pleaseQuit=true;
 } 
@@ -407,15 +413,14 @@ void ocvCaptureApp::draw()
 		}
 		if (showFramerate) {
 			gl::drawStringRight (toString(getAverageFps())+"<-Frame rate",  Vec2f(bounds.getWidth()-5,5),Color(0.25f,0.0f,0.0f));
-			gl::drawStringRight(toString(speed)+"<-Speed",  Vec2f(bounds.getWidth()-5,25),Color(0.25f,0.0f,0.0f));
-			gl::drawStringRight(toString(totalDuration)+"<-Duration",  Vec2f(bounds.getWidth()-5,45),Color(0.25f,0.0f,0.0f));
+			gl::drawStringRight(toString(totalDuration)+"<-Duration",  Vec2f(bounds.getWidth()-5,25),Color(0.25f,0.0f,0.0f));
 			if (wroteFrame) {
 				string rs="RECORDING";
 				float r=(speed/maxSpeed);
 				float l=r*(bounds.getWidth()/2);
-				gl::drawStringRight("RECORDING<",  Vec2f(bounds.getWidth()-(5+l),65),Color(0.25f,0.0f,0.0f));
+				gl::drawStringRight("RECORDING<",  Vec2f(bounds.getWidth()-(5+l),45),Color(0.25f,0.0f,0.0f));
 				gl::color(Color(0.5f-(r/2),0.0f,0.0f));
-				gl::drawSolidRect(Rectf(bounds.getWidth()-(5+l),65,bounds.getWidth()-5,75));
+				gl::drawSolidRect(Rectf(bounds.getWidth()-(5+l),45,bounds.getWidth()-5,55));
 				gl::color(Color(1.0f,1.0f,1.0f));
 			}
 		}
@@ -438,31 +443,39 @@ void ocvCaptureApp::draw()
 			float gHeight=bounds.getHeight()/4;
 			gl::drawLine(Vec2f(0,gY),Vec2f(bounds.getWidth(),gY));
 			gl::drawLine(Vec2f(0,gY+gHeight),Vec2f(bounds.getWidth(),gY+gHeight));
-			float thresh=(gY+gHeight)-(changeThresholdMin*gHeight);
-			gl::color(Color(0.5f,0.0f,0.0f));
-			gl::drawLine(Vec2f(0,thresh),Vec2f(bounds.getWidth(),thresh));
-			thresh=(gY+gHeight)-((changeThresholdMin-changeThresholdMargin)*gHeight);
-			gl::drawLine(Vec2f(0,thresh),Vec2f(bounds.getWidth(),thresh));
-			gl::color(Color(1.0f,0.0f,0.0f));
+			//float thresh=(gY+gHeight)-(changeThresholdMin*gHeight);
+			//gl::color(Color(0.5f,0.0f,0.0f));
+			//gl::drawLine(Vec2f(0,thresh),Vec2f(bounds.getWidth(),thresh));
+			//thresh=(gY+gHeight)-((changeThresholdMin-changeThresholdMargin)*gHeight);
+			//gl::drawLine(Vec2f(0,thresh),Vec2f(bounds.getWidth(),thresh));
+			//gl::color(Color(1.0f,0.0f,0.0f));
 			float sw=bounds.getWidth()/(LOGlength-1.0f);
 			int i=LOGi-1>0?LOGi-1:LOGlength-1;
 			int i1=i;
 			int i2=i1>0?i1-1:LOGlength-1;
 			for (int i=0;i<LOGlength-1;i++) {
-				for (int s=0;s<LOGs;s++) {
+				for (int s=1;s<LOGs;s++) {
 					gl::color(LOGc[s]);
 					float x=i*sw;
 					float y1=(gY+gHeight)-(LOG[1][s][i1]*gHeight);
 					float y2=(gY+gHeight)-(LOG[1][s][i2]*gHeight);
 					gl::drawLine(Vec2f(x,y1),Vec2f(x+sw,y2));
+					if (s==1) {
+						gl::drawLine(Vec2f(x+1,y1),Vec2f(x+sw+1,y2));
+						gl::drawLine(Vec2f(x+1,y1+1),Vec2f(x+sw+1,y2+1));
+						gl::drawLine(Vec2f(x,y1+1),Vec2f(x+sw,y2+1));
+					}
 				}
 				if (--i1<0)
 					i1=LOGlength-1;
 				if (--i2<0)
 					i2=LOGlength-1;
 			}
-			float ly=gY+5;
-			for (int s=0;s<LOGs;s++) {
+		}
+		if (showValues) {
+			int i=LOGi-1>0?LOGi-1:LOGlength-1;
+			float ly=5+bounds.getHeight()/2;
+			for (int s=1;s<LOGs;s++) {
 				gl::drawStringRight (toString(LOG[1][s][i])+"<-"+LOGlable[s],  Vec2f(bounds.getWidth()-5,ly),LOGc[s]);
 				ly+=20;
 			}
