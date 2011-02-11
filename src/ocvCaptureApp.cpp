@@ -97,7 +97,7 @@ void ocvCaptureApp::setup()
 	changeSoftRange=0.0f;
 	changeRangeK=1/8.0f;
 	changeLift=1/400.0f;
-	changeFieldK=2;
+	changeFieldK=3;
 	changeFriction=0.2f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
@@ -295,12 +295,12 @@ void ocvCaptureApp::update()
 				float absChangeChange=abs(changeChange);
 				if (absChangeChange>0) {
 					absChangeChange=sqrt(absChangeChange);
-					float dMin=((changeGrounded)-minChange)*400;
+					float dMin=((changeGrounded)-minChange)*200;
 					if (dMin<0)
 						dMin=0;
 					float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
 					minChangeV-=fMin;
-					float dMax=(maxChange-(changeGrounded))*400;
+					float dMax=(maxChange-(changeGrounded))*200;
 					if (dMax<0)
 						dMax=0;
 					float fMax=0.5f*(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
@@ -332,7 +332,7 @@ void ocvCaptureApp::update()
 			changeScalar=LOG[1][1][LOGi]=t;
 			
 			
-			opacity=changeScalar*changeScalar*maxOpacity;
+			opacity=changeScalar*maxOpacity;
 			if (opacity>0)
 				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
 			oldTimer=time;
