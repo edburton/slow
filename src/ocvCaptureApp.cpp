@@ -91,14 +91,14 @@ public:
 
 void ocvCaptureApp::setup()
 {
-	maxSpeed=sqrt(2.0f);
+	maxSpeed=1;
 	changeThresholdMin=100;
 	changeThresholdMargin=0.1f;
 	changeSoftRange=0.0f;
-	changeRangeK=1/8.0f;
-	changeLift=1/400.0f;
-	changeFieldK=3;
-	changeFriction=0.2f;
+	changeRangeK=1/12.0f;
+	changeLift=1/8.0f;
+	changeFieldK=2;
+	changeFriction=0.1f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
 	cvOutputThen=1;
 	float maxT=-1;
@@ -295,12 +295,12 @@ void ocvCaptureApp::update()
 				float absChangeChange=abs(changeChange);
 				if (absChangeChange>0) {
 					absChangeChange=sqrt(absChangeChange);
-					float dMin=((changeGrounded)-minChange)*200;
+					float dMin=((changeGrounded)-minChange)*80;
 					if (dMin<0)
 						dMin=0;
 					float fMin=(absChangeChange*changeFieldK)*sin(M_PI/(dMin+2));
 					minChangeV-=fMin;
-					float dMax=(maxChange-(changeGrounded))*200;
+					float dMax=(maxChange-(changeGrounded))*80;
 					if (dMax<0)
 						dMax=0;
 					float fMax=0.5f*(absChangeChange*changeFieldK)*sin(M_PI/(dMax+2));
@@ -319,7 +319,7 @@ void ocvCaptureApp::update()
 				changeScalar=1;
 			else if (changeScalar<0)
 				changeScalar=0;
-			changeScalar*=changeScalar;
+			//dchangeScalar*=changeScalar;
 			
 			LOG[0][1][LOGi]=changeScalar;
 			int ix=LOGi;
