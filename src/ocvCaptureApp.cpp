@@ -36,7 +36,8 @@ public:
 	cv::Mat			cvBlurredP3;
 	vector<cv::Mat>	cvInput;
 	vector<cv::Mat>	cvBlurredThumbnails;
-	cv::Mat cvLastSmoothedThumbnail;
+	cv::Mat cvSmoothedThumbnailA;
+	cv::Mat cvSmoothedThumbnailB;
 	float change;
 	float changeGrounded;
 	float changeThresholdMin;
@@ -59,7 +60,7 @@ public:
 	int cvOutputNow;
 	int cvOutputThen;
 	int cvBlurredThumbnailNow;
-	static const float maxOpacity=1.0f/6;
+	static const float maxOpacity=1.0f/8;
 	int camWidth, camHeight;
 	int camY;
 	static const float diffScale=8;
@@ -92,9 +93,9 @@ public:
 void ocvCaptureApp::setup()
 {
 	maxSpeed=1;
-	changeThresholdMin=100;
-	changeThresholdMargin=0.1f;
-	changeSoftRange=0.0f;
+	changeThresholdMin=10;
+	changeThresholdMargin=0.05f;
+	changeSoftRange=changeThresholdMargin*4;
 	changeRangeK=1/12.0f;
 	changeLift=1/8.0f;
 	changeFieldK=2;
@@ -115,7 +116,6 @@ void ocvCaptureApp::setup()
 		}
 	}
 	camDelay=(int)round(smoothPeakPosition*2.5f); //should be 3? not sure why 2.5 works better
-	//console() << "smoothLength=" << toString(smoothLength)<< " smoothPeakPosition=" << toString(smoothPeakPosition) << endl;
 	for (int i=0;i<smoothLength;i++)
 		windowA[i]/=total;
 	int c=0;
@@ -175,7 +175,7 @@ void ocvCaptureApp::setup()
 	{	
 		qtime::MovieWriter::Format format;
 		format.setCodec( qtime::MovieWriter::CODEC_MP4);
-		format.setQuality( 0.9f );
+		format.setQuality( 0.8f );
 		format.setDefaultDuration(1/10.0f);
 		mMovieWriter = qtime::MovieWriter( path, camWidth, camHeight, format );
 	}
@@ -187,7 +187,8 @@ void ocvCaptureApp::setup()
 	cvBlurredP3 = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	for (int n=0;n<smoothLength+1;n++)
 		cvBlurredThumbnails.push_back(cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0)));
-	cvLastSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
+	cvSmoothedThumbnailB = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
+	cvSmoothedThumbnailA = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 	setWindowSize(camWidth, camHeight);
 	showFramerate=false;
 	debug=false;
@@ -210,7 +211,7 @@ void ocvCaptureApp::update()
 			split(rgb, planes);
 			cv::Scalar  sums=cv::mean(rgb);
 			float max=0;
-			for (int i=0;i<3;i++)
+			for (int i=0;i<3;i++) 
 				if (sums[i]>max)
 					max=sums[i];
 			float v[3];
@@ -233,24 +234,24 @@ void ocvCaptureApp::update()
 			cvBlurredThumbnailNow=++cvBlurredThumbnailNow%(smoothLength+1);
 			cv::flip(cvP1,cvInput[cvOutputNow],1);
 			cv::resize(cvInput[cvOutputNow],cvBlurredP3,cv::Size(diffWidth,diffHeight),0,0,CV_INTER_AREA);
-			cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(15,15), 0);
+			cv::GaussianBlur(cvBlurredP3, cvBlurredThumbnails[cvBlurredThumbnailNow] , cv::Size(5,5), 0);
 			float changeRange=0;
 			float previousChange=changeGrounded;
 			int indx=LOGi;
 			if (!firstFrame) {
 				int index=cvBlurredThumbnailNow;
-				cv::Mat cvThisSmoothedThumbnail = cv::Mat(diffHeight,diffWidth,CV_32FC3,cv::Scalar(0,0,0));
 				for (int i=0;i<smoothLength;i++) {
-					cv::accumulateWeighted(cvBlurredThumbnails[index],cvThisSmoothedThumbnail,windowA[i]);
+					cv::accumulateWeighted(cvBlurredThumbnails[index],camFrameCount%2?cvSmoothedThumbnailA:cvSmoothedThumbnailB,windowA[i]);
 					if (--index<0)
 						index=smoothLength;
 				}
-				cv::absdiff(cvThisSmoothedThumbnail,cvLastSmoothedThumbnail,cvBlurredP3);
+				cv::absdiff(cvSmoothedThumbnailA,cvSmoothedThumbnailB,cvBlurredP3);
 				cv::Scalar changes=cv::sum(cvBlurredP3);
 				change=sqrt((0.2126f*changes[2])+(0.7152*changes[1])+(0.0722*changes[0]));
-				cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
 				if (change>absoluteMaxChange)
 					absoluteMaxChange=change;
+				//cvThisSmoothedThumbnail.copyTo(cvLastSmoothedThumbnail);
+				
 				
 				changeThresholdMin=-1;
 				for (int i=0;i<LOGlength;i++) {
@@ -279,8 +280,11 @@ void ocvCaptureApp::update()
 				
 				float d=(maxChange-minChange)-changeSoftRange;
 				minChangeV+=changeLift;
-				minChangeV+=d*changeRangeK;
-				maxChangeV-=d*changeRangeK;
+				float k=changeRangeK;
+				if (camFrameCount<80)
+					k*=1+(80-camFrameCount);
+				minChangeV+=d*k;
+				maxChangeV-=d*k;
 				minChangeV*=changeFriction;
 				maxChangeV*=changeFriction;
 				minChange+=minChangeV;
@@ -429,7 +433,7 @@ void ocvCaptureApp::draw()
 			if (image) {
 				gl::draw( image, Rectf(0,0,bounds.getWidth()/4,bounds.getHeight()/4));
 			}
-			image = fromOcv(cvLastSmoothedThumbnail);
+			image = fromOcv(camFrameCount%2?cvSmoothedThumbnailA:cvSmoothedThumbnailB);
 			if (image) {
 				gl::draw( image, Rectf(0,bounds.getHeight()/4,bounds.getWidth()/4,bounds.getHeight()/2));
 			}
