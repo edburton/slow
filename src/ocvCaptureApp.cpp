@@ -94,8 +94,8 @@ void ocvCaptureApp::setup()
 {
 	maxSpeed=1;
 	changeThresholdMin=10;
-	changeThresholdMargin=0.05f;
-	changeSoftRange=changeThresholdMargin*4;
+	changeThresholdMargin=0.1f;
+	changeSoftRange=changeThresholdMargin*2;
 	changeRangeK=1/12.0f;
 	changeLift=1/8.0f;
 	changeFieldK=2;
@@ -373,7 +373,7 @@ void ocvCaptureApp::update()
 		showCursor();
 		setFullScreen(false);
 	}
-	if (pleaseQuitCount==3)
+	if (pleaseQuitCount==20)
 		AppBasic::quit();
 	//if (camFrameCount%100==0)
 	//	console() << toString(getAverageFps())+"<-Frame rate" << endl;
