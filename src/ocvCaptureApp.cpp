@@ -94,10 +94,10 @@ void ocvCaptureApp::setup()
 {
 	maxSpeed=1;
 	changeThresholdMin=10;
-	changeThresholdMargin=0.1f;
+	changeThresholdMargin=0.2f;
 	changeSoftRange=changeThresholdMargin*2;
 	changeRangeK=1/12.0f;
-	changeLift=1/8.0f;
+	changeLift=1/6.0f;
 	changeFieldK=2;
 	changeFriction=0.1f;
 	cvBlurredThumbnailNow=cvOutputNow=0;
@@ -216,7 +216,7 @@ void ocvCaptureApp::update()
 					max=sums[i];
 			float v[3];
 			for (int i=0;i<3;i++)
-				v[i]=(sums[i]/max);
+				v[i]=sqrt(sums[i]/max);
 			cv::Mat blue(planes[0]),b;
 			cv::equalizeHist(blue, b);
 			cv::Mat green(planes[1]),g;
