@@ -86,15 +86,15 @@ public:
 	string LOGlable[LOGs];
 	float *LOGp[LOGs];
 	Color LOGc[LOGs];
-	bool wroteFrame;
+	bool wroteFrame; 
 	float t;
 };
 
 void ocvCaptureApp::setup()
 {
-	maxSpeed=1;
-	changeThresholdMin=10;
-	changeThresholdMargin=0.2f;
+	maxSpeed=sqrt(2);
+	changeThresholdMin=15;
+	changeThresholdMargin=0.25f;
 	changeSoftRange=changeThresholdMargin*2;
 	changeRangeK=1/12.0f;
 	changeLift=1/6.0f;
@@ -337,8 +337,8 @@ void ocvCaptureApp::update()
 			
 			
 			opacity=changeScalar*maxOpacity;
-			if (opacity>0)
-				cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
+			
+				
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
@@ -347,14 +347,23 @@ void ocvCaptureApp::update()
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
 				speed=duration/realDuration;
+				int frames=(ceil(duration/realDuration));
+				
 				ImageSourceRef image = fromOcv(cvOut);
-				if (image) {
-					mMovieWriter.addFrame(image ,duration) ;
-					wroteFrame=true;
-				}
+				if (image)	
+					for (int c=0;c<frames;c++)
+					{
+						cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity/frames);
+						mMovieWriter.addFrame(image ,duration/frames) ;
+						wroteFrame=true;
+					}
 			}
-			else
+			else {
 				speed=0;
+				if (opacity>0)
+					cv::accumulateWeighted(cvInput[cvOutputThen],cvOut,opacity);
+				
+			}
 			for (int s=2;s<LOGs;s++)
 				LOG[0][s][LOGi]=LOG[1][s][LOGi]=*LOGp[s];
 			LOGi=++LOGi%LOGlength;
