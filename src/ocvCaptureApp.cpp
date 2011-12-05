@@ -342,13 +342,11 @@ void ocvCaptureApp::update()
 			oldTimer=time;
 			time=getElapsedSeconds();
 			float realDuration=oldTimer>0?time-oldTimer:0;
-			float duration=maxSpeed*realDuration;
-			duration*=changeScalar;
+			float duration=maxSpeed*realDuration*changeScalar;
 			if (mMovieWriter && opacity>0 && duration>0) {
 				totalDuration+=duration;
 				speed=duration/realDuration;
 				int frames=(ceil(duration/realDuration));
-				
 				ImageSourceRef image = fromOcv(cvOut);
 				if (image)	
 					for (int c=0;c<frames;c++)
